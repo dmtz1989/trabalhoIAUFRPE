@@ -3,9 +3,11 @@ avaliar_todos.py - Aplica o modelo salvo em TODOS os clientes do banco.
 
 Uso:  python avaliar_todos.py
 """
+import os
 import numpy as np
 from mlp import MLP
-from treinamento import ARQUIVO_MODELO, carregar_dados, dividir, metricas, auc_roc
+from treinamento import (ARQUIVO_DADOS, ARQUIVO_MODELO, auc_roc, carregar_dados, dividir,
+                         metricas, treinar_e_salvar)
 
 
 def relatorio(titulo, y, probs, limiar):
@@ -17,6 +19,14 @@ def relatorio(titulo, y, probs, limiar):
 
 
 def main():
+    if not os.path.exists(ARQUIVO_DADOS):
+        print(f"Banco de dados '{ARQUIVO_DADOS}' não encontrado na pasta.")
+        return
+    # Se o modelo ainda não existe, treina e salva (gera o modelo_mlp.npz)
+    if not os.path.exists(ARQUIVO_MODELO):
+        print(f"Modelo '{ARQUIVO_MODELO}' não encontrado. Treinando um novo...\n")
+        treinar_e_salvar()
+        print("\n" + "=" * 60 + "\n")
     rede, params = MLP.carregar(ARQUIVO_MODELO)
     X, y = carregar_dados()
     Xn = (X - params["media"]) / params["desvio"]

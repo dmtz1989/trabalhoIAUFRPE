@@ -112,7 +112,10 @@ class MLP:
 
     @classmethod
     def carregar(cls, caminho):
-        d = np.load(caminho, allow_pickle=True)
-        rede = cls(n_entradas=d["W1"].shape[0], n_ocultos=d["W1"].shape[1])
-        rede.W1, rede.b1, rede.W2, rede.b2 = d["W1"], d["b1"], d["W2"], d["b2"]
-        return rede, d
+        # Lê todo o conteúdo e FECHA o arquivo (no Windows, um .npz aberto não pode
+        # ser apagado nem sobrescrito).
+        with np.load(caminho) as d:
+            dados = {chave: d[chave] for chave in d.files}
+        rede = cls(n_entradas=dados["W1"].shape[0], n_ocultos=dados["W1"].shape[1])
+        rede.W1, rede.b1, rede.W2, rede.b2 = dados["W1"], dados["b1"], dados["W2"], dados["b2"]
+        return rede, dados

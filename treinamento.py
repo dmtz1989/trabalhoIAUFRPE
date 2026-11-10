@@ -114,7 +114,8 @@ def melhor_limiar(probs, y):
     return float(melhor[1])
 
 
-def main():
+def treinar_e_salvar():
+    """Treina a rede, avalia no teste e salva o modelo em modelo_mlp.npz."""
     print("Carregando dados...")
     X, y = carregar_dados()
     tr, va, te = dividir(len(X))
@@ -162,4 +163,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    treinar_e_salvar()

@@ -1,7 +1,7 @@
 """
 app.py - Análise de crédito com MLP: cadastro individual e importação do banco completo.
 
-Uso:  python app.py      (antes, rode 'python treinamento.py' uma vez)
+Uso:  python app.py      (se o modelo não existir, ele é treinado automaticamente)
 """
 import csv
 import json
@@ -10,7 +10,7 @@ import numpy as np
 from mlp import MLP
 from treinamento import (ARQUIVO_DADOS, ARQUIVO_MODELO, COLUNA_ALVO, PAY_COLS,
                          auc_roc, ler_planilha, metricas, montar_entradas,
-                         montar_entradas_df)
+                         montar_entradas_df, treinar_e_salvar)
 
 ARQUIVO_CLIENTES = "clientes.json"
 ARQUIVO_RESULTADOS = "resultados_clientes.csv"
@@ -198,9 +198,15 @@ def exportar():
 
 
 def main():
+    # Se o modelo ainda não existe, treina e salva (gera o modelo_mlp.npz)
     if not os.path.exists(ARQUIVO_MODELO):
-        print("Modelo não encontrado. Rode primeiro:  python treinamento.py")
-        return
+        if not os.path.exists(ARQUIVO_DADOS):
+            print(f"Modelo não encontrado e '{ARQUIVO_DADOS}' também não está na pasta.")
+            print("Coloque o banco de dados na pasta para treinar o modelo.")
+            return
+        print(f"Modelo '{ARQUIVO_MODELO}' não encontrado. Treinando um novo...\n")
+        treinar_e_salvar()
+        print("\n" + "=" * 60)
     rede, params = MLP.carregar(ARQUIVO_MODELO)
 
     while True:
