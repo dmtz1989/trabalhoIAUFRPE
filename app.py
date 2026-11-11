@@ -7,10 +7,11 @@ import csv
 import json
 import os
 import numpy as np
+import pandas as pd
 from mlp import MLP
 from treinamento import (ARQUIVO_DADOS, ARQUIVO_MODELO, COLUNA_ALVO, PAY_COLS,
-                         auc_roc, ler_planilha, metricas, montar_entradas,
-                         montar_entradas_df, treinar_e_salvar)
+                         auc_roc, imprimir_matriz, ler_planilha, metricas,
+                         montar_entradas, treinar_e_salvar)
 
 ARQUIVO_CLIENTES = "clientes.json"
 ARQUIVO_RESULTADOS = "resultados_clientes.csv"
@@ -57,8 +58,9 @@ def normalizar(entradas, params):
 
 
 def prever_cliente(rede, params, historico_pay, limite, ultimo_pagamento):
-    entradas = np.array([montar_entradas(historico_pay, limite, ultimo_pagamento)], dtype=float)
-    prob = float(rede.prever_proba(normalizar(entradas, params))[0, 0])
+    cliente = pd.DataFrame([dict(zip(PAY_COLS, historico_pay),
+                                 LIMIT_BAL=limite, PAY_AMT1=ultimo_pagamento)])
+    prob = float(rede.prever_proba(normalizar(montar_entradas(cliente), params))[0, 0])
     return prob, prob >= float(params["limiar"])
 
 
@@ -77,13 +79,14 @@ def cadastrar(rede, params):
 
     print("\n--- RESULTADO DA ANÁLISE ---")
     print(f"Cliente: {nome}")
-    print(f"Pontuação de risco (saída da rede): {prob:.1%}")
+    print(f"Pontuação de risco (saída da rede): {prob:.1%}  (alto risco a partir de 50%)")
     if inadimplente:
-        print("Previsão: ALTO RISCO - provável que NÃO pague a próxima fatura.")
+        print("Previsão: ALTO RISCO - perfil com maior chance de NÃO pagar a próxima fatura.")
         print("Sugestão: crédito negado / limite reduzido / análise manual.")
     else:
-        print("Previsão: BAIXO RISCO - provável que pague a próxima fatura.")
+        print("Previsão: BAIXO RISCO - perfil com maior chance de pagar a próxima fatura.")
         print("Sugestão: crédito aprovado.")
+    print("Obs.: a pontuação serve para ordenar clientes por risco; não é a probabilidade real de calote.")
 
     clientes = carregar_clientes()
     clientes.append({"id": None, "nome": nome, "limite": limite, "historico_pay": hist,
@@ -103,7 +106,7 @@ def listar():
     print(f"\nTotal: {len(clientes)} clientes | alto risco: {altos} | baixo risco: {len(clientes) - altos}")
     mostrar = clientes[-20:]
     if len(clientes) > 20:
-        print(f"(mostrando os 20 últimos; use a opção 5 para exportar todos em CSV)")
+        print("(mostrando os 20 últimos; use a opção 5 para exportar todos em CSV)")
     print(f"\n{'Nome':<25}{'Risco':>8}  Previsão")
     for c in mostrar:
         status = "ALTO RISCO" if c["previsao_inadimplente"] else "baixo risco"
@@ -123,6 +126,9 @@ def importar_banco(rede, params):
         print(f"Não foi possível ler o arquivo: {e}")
         return
 
+    if "ID" not in df.columns:
+        print("Aviso: o arquivo não tem coluna ID, então não há como evitar duplicatas "
+              "se ele for importado de novo.")
     # Evita duplicar clientes já importados (mesmo ID)
     clientes = carregar_clientes()
     ids_existentes = {c["id"] for c in clientes if c.get("id") is not None}
@@ -133,48 +139,50 @@ def importar_banco(rede, params):
         return
 
     # Previsão de TODOS de uma vez (operações em matriz, sem loop por cliente)
-    probs = rede.prever_proba(normalizar(montar_entradas_df(df), params)).ravel()
+    probs = rede.prever_proba(normalizar(montar_entradas(df), params)).ravel()
     limiar = float(params["limiar"])
-    tem_real = COLUNA_ALVO in df.columns
 
-    ids = df["ID"].tolist() if "ID" in df.columns else [None] * len(df)
-    for i, (idx, linha) in enumerate(df.iterrows()):
+    n = len(df)
+    ids = df["ID"].tolist() if "ID" in df.columns else [None] * n
+    historicos = df[PAY_COLS].astype(int).values.tolist()
+    limites = df["LIMIT_BAL"].astype(float).tolist()
+    pagamentos = df["PAY_AMT1"].astype(float).tolist()
+    reais = df[COLUNA_ALVO].astype(int).tolist() if COLUNA_ALVO in df.columns else [None] * n
+
+    for i in range(n):
         clientes.append({
             "id": ids[i],
             "nome": f"Cliente {ids[i]}" if ids[i] is not None else f"Cliente {len(clientes) + 1}",
-            "limite": float(linha["LIMIT_BAL"]),
-            "historico_pay": [int(linha[c]) for c in PAY_COLS],
-            "ultimo_pagamento": float(linha["PAY_AMT1"]),
+            "limite": limites[i],
+            "historico_pay": historicos[i],
+            "ultimo_pagamento": pagamentos[i],
             "risco": round(float(probs[i]), 4),
             "previsao_inadimplente": bool(probs[i] >= limiar),
-            "real": int(linha[COLUNA_ALVO]) if tem_real else None,
+            "real": reais[i],
         })
     salvar_clientes(clientes)
-    print(f"{len(df)} clientes importados e analisados. Total cadastrado: {len(clientes)}.")
+    print(f"{n} clientes importados e analisados. Total cadastrado: {len(clientes)}.")
     relatorio(params)
 
 
 # ---------- 4) Relatório de acurácia ----------
-def relatorio(params=None):
+def relatorio(params):
     clientes = [c for c in carregar_clientes() if c.get("real") is not None]
     if not clientes:
         print("\nNenhum cliente com resultado real conhecido (importe o banco completo - opção 3).")
         return
     y = np.array([[c["real"]] for c in clientes], dtype=float)
     probs = np.array([[c["risco"]] for c in clientes])
-    limiar = float(params["limiar"]) if params is not None else 0.25
+    limiar = float(params["limiar"])
+    m = metricas(y, (probs >= limiar).astype(int))
 
     print(f"\n=== RELATÓRIO: {len(clientes)} clientes com resultado real ===")
-    print(f"Baseline ('ninguém dá calote'): {1 - y.mean():.1%}")
-    for lim in sorted({limiar, 0.5}):
-        m = metricas(y, (probs >= lim).astype(int))
-        print(f"\nLimiar {lim:.2f}:")
-        print(f"  Acurácia {m['acuracia']:.1%} | Precisão {m['precisao']:.1%} | "
-              f"Recall {m['recall']:.1%} | F1 {m['f1']:.3f}")
-        print(f"  Acertou {m['vp']} calotes e {m['vn']} bons pagadores | "
-              f"alarmes falsos: {m['fp']} | calotes não detectados: {m['fn']}")
-    print(f"\nAUC-ROC: {auc_roc(probs, y):.3f}")
-    print("Obs.: parte desses clientes foi usada no treino, então o número é otimista.")
+    print(f"Baseline ('ninguém dá calote'): {1 - y.mean():.1%} | limiar de decisão: {limiar:.2f}")
+    print(f"Acurácia {m['acuracia']:.1%} | Precisão {m['precisao']:.1%} | "
+          f"Recall {m['recall']:.1%} | F1 {m['f1']:.3f} | AUC-ROC {auc_roc(probs, y):.3f}\n")
+    print("Matriz de confusão:")
+    imprimir_matriz(m)
+    print("\nObs.: parte desses clientes foi usada no treino, então o número é otimista.")
 
 
 # ---------- 5) Exportação ----------

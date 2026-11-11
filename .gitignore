@@ -1,0 +1,11 @@
+# Dados gerados pela aplicação (contêm dados de clientes)
+clientes.json
+resultados_clientes.csv
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Banco de dados original: descomente se não quiser versionar o arquivo
+# default_of_credit_card_clients.xls

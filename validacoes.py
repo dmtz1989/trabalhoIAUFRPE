@@ -6,6 +6,7 @@ Requer o banco de dados (.xls) na pasta. Não altera o modelo nem os clientes
 salvos: os testes que gravam arquivos usam uma pasta temporária.
 """
 import contextlib
+import importlib.util
 import io
 import os
 import sys
@@ -18,8 +19,9 @@ import numpy as np
 import app
 from mlp import MLP
 from treinamento import (ARQUIVO_DADOS, ARQUIVO_MODELO, COLUNA_ALVO, PAY_COLS,
-                         auc_roc, carregar_dados, dividir, ler_planilha, metricas,
-                         montar_entradas, montar_entradas_df, treinar_e_salvar)
+                         auc_roc, balancear_oversampling, carregar_dados,
+                         dividir_estratificado, ler_planilha, metricas,
+                         montar_entradas, treinar_e_salvar)
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 resultados = []
@@ -113,32 +115,51 @@ def teste_dados():
     sem_nulos = not df[obrig].isna().any().any()
     alvo_ok = set(df[COLUNA_ALVO].unique()) <= {0, 1}
     pay_min, pay_max = int(df[PAY_COLS].min().min()), int(df[PAY_COLS].max().max())
-    registrar("Banco íntegro: 30.000 linhas, IDs únicos, sem nulos, alvo binário",
-              len(df) == 30000 and df["ID"].is_unique and sem_nulos and alvo_ok,
+    registrar("Banco íntegro: 30.000 linhas, IDs únicos, sem nulos, alvo binário, pagamentos não negativos",
+              len(df) == 30000 and df["ID"].is_unique and sem_nulos and alvo_ok
+              and bool((df["PAY_AMT1"] >= 0).all()),
               f"inadimplentes={df[COLUNA_ALVO].mean():.1%} | PAY de {pay_min} a {pay_max} | "
               f"limite de {int(df.LIMIT_BAL.min()):,} a {int(df.LIMIT_BAL.max()):,}")
-    registrar("Valores de pagamento nunca negativos", bool((df["PAY_AMT1"] >= 0).all()))
 
 
-def teste_entradas_lote_vs_individual():
-    df = ler_planilha(os.path.join(PASTA, ARQUIVO_DADOS)).iloc[:5000]
-    lote = montar_entradas_df(df)
-    indiv = np.array([montar_entradas(l[PAY_COLS].tolist(), l["LIMIT_BAL"], l["PAY_AMT1"])
-                      for _, l in df.iterrows()])
-    registrar("Entradas em lote (importação) idênticas às do cadastro individual",
-              np.allclose(lote, indiv), "5.000 clientes comparados")
+def teste_divisao_estratificada():
+    _, y = carregar_dados(os.path.join(PASTA, ARQUIVO_DADOS))
+    r = y.ravel()
+    tr, te = dividir_estratificado(y)
+    sem_sobreposicao = not (set(tr) & set(te)) and len(set(tr) | set(te)) == len(y)
+    prop = []
+    for c in (0, 1):
+        total = int((r == c).sum())
+        no_treino = int((r[tr] == c).sum())
+        prop.append(abs(no_treino - round(0.7 * total)) <= 1)     # 70% EXATOS de cada classe
+    registrar("Divisão estratificada: 70% da classe 0 + 70% da classe 1 no treino; 30% de cada no teste",
+              (len(tr), len(te)) == (21000, 9000) and sem_sobreposicao and all(prop),
+              f"treino {len(tr)} (classe 0: {int((r[tr]==0).sum())}, classe 1: {int((r[tr]==1).sum())}) | "
+              f"teste {len(te)} (classe 0: {int((r[te]==0).sum())}, classe 1: {int((r[te]==1).sum())})")
+    registrar("Treino e teste mantêm a mesma proporção de inadimplentes do banco",
+              abs(r[tr].mean() - r.mean()) < 0.001 and abs(r[te].mean() - r.mean()) < 0.001,
+              f"banco {r.mean():.2%} | treino {r[tr].mean():.2%} | teste {r[te].mean():.2%}")
 
 
-def teste_divisao_e_normalizacao():
+def teste_oversampling():
+    _, y = carregar_dados(os.path.join(PASTA, ARQUIVO_DADOS))
+    r = y.ravel()
+    tr, te = dividir_estratificado(y)
+    tb = balancear_oversampling(tr, y)
+    n0, n1 = int((r[tb] == 0).sum()), int((r[tb] == 1).sum())
+    registrar("Oversampling iguala as duas classes no treino",
+              n0 == n1 == int((r[tr] == 0).sum()), f"classe 0: {n0} | classe 1: {n1}")
+    registrar("Oversampling não perde exemplos, só duplica a classe 1 e não vaza para o teste",
+              set(tr) == set(tb) and not (set(tb) & set(te)) and
+              int((r[tb] == 0).sum()) == int((r[tr] == 0).sum()),
+              f"{len(set(tb))} clientes distintos = {len(tr)} do treino original")
+
+
+def teste_normalizacao():
     X, y = carregar_dados(os.path.join(PASTA, ARQUIVO_DADOS))
-    tr, va, te = dividir(len(X))
-    sem_sobreposicao = not (set(tr) & set(va) or set(tr) & set(te) or set(va) & set(te))
-    registrar("Divisão 70/15/15 sem sobreposição entre treino, validação e teste",
-              (len(tr), len(va), len(te)) == (21000, 4500, 4500) and sem_sobreposicao
-              and len(set(tr) | set(va) | set(te)) == len(X),
-              f"{len(tr)}/{len(va)}/{len(te)}")
+    tr, _ = dividir_estratificado(y)
     _, params = MLP.carregar(os.path.join(PASTA, ARQUIVO_MODELO))
-    registrar("Normalização do modelo usa somente estatísticas do treino (sem vazamento)",
+    registrar("Normalização do modelo usa somente estatísticas do treino (sem vazamento do teste)",
               np.allclose(params["media"], X[tr].mean(0)) and np.allclose(params["desvio"], X[tr].std(0)))
 
 
@@ -148,6 +169,22 @@ def teste_modelo_salvo():
     registrar("Modelo salvo tem a arquitetura 4-8-1 e limiar válido",
               rede.W1.shape == (4, 8) and rede.W2.shape == (8, 1) and 0 < float(params["limiar"]) < 1,
               f"limiar = {float(params['limiar']):.2f}")
+
+
+def teste_matriz_de_confusao():
+    """Matriz de confusão do modelo salvo nos 30% de teste: VP, FP, VN, FN."""
+    rede, params = MLP.carregar(os.path.join(PASTA, ARQUIVO_MODELO))
+    X, y = carregar_dados(os.path.join(PASTA, ARQUIVO_DADOS))
+    _, te = dividir_estratificado(y)
+    prev = rede.prever((X[te] - params["media"]) / params["desvio"], float(params["limiar"])).ravel()
+    real = y[te].ravel()
+    vp = int(((prev == 1) & (real == 1)).sum()); fp = int(((prev == 1) & (real == 0)).sum())
+    vn = int(((prev == 0) & (real == 0)).sum()); fn = int(((prev == 0) & (real == 1)).sum())
+    m = metricas(y[te], prev)
+    registrar("Matriz de confusão do teste: soma 9.000, bate com as classes reais e com as métricas",
+              vp + fp + vn + fn == 9000 and vp + fn == int(real.sum()) and vn + fp == int((real == 0).sum())
+              and (m["vp"], m["fp"], m["vn"], m["fn"]) == (vp, fp, vn, fn),
+              f"VP={vp} FP={fp} VN={vn} FN={fn}")
 
 
 def teste_reprodutibilidade():
@@ -222,6 +259,42 @@ def teste_importacao():
         registrar("Exportação gera CSV com cabeçalho + 30.000 linhas", csv_ok and linhas == 30001)
 
 
+def teste_formatos_de_arquivo():
+    """A importação aceita .csv, .xlsx e variações do dataset, e avisa quando falta coluna."""
+    ref = ler_planilha(os.path.join(PASTA, ARQUIVO_DADOS))
+    Xref = montar_entradas(ref)
+    resultados_formatos = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        p = os.path.join(tmp, "padrao.csv"); ref.to_csv(p, index=False)
+        resultados_formatos["csv"] = np.allclose(montar_entradas(ler_planilha(p)), Xref)
+
+        kaggle = ref.rename(columns={"PAY_0": "PAY_1", COLUNA_ALVO: "default.payment.next.month"})
+        p = os.path.join(tmp, "kaggle.csv"); kaggle.to_csv(p, index=False)
+        d = ler_planilha(p)
+        resultados_formatos["csv com PAY_1 e default.payment.next.month"] = (
+            np.allclose(montar_entradas(d), Xref) and COLUNA_ALVO in d.columns)
+
+        p = os.path.join(tmp, "sem_alvo.csv"); ref.drop(columns=["ID", COLUNA_ALVO]).to_csv(p, index=False)
+        d = ler_planilha(p)
+        resultados_formatos["csv sem ID e sem resultado real"] = (
+            len(d) == 30000 and COLUNA_ALVO not in d.columns)
+
+        if importlib.util.find_spec("openpyxl") is not None:
+            p = os.path.join(tmp, "dados.xlsx"); ref.to_excel(p, index=False)
+            resultados_formatos["xlsx"] = np.allclose(montar_entradas(ler_planilha(p)), Xref)
+        else:
+            print("      (xlsx pulado: instale 'openpyxl' para testar esse formato)")
+
+        p = os.path.join(tmp, "incompleto.csv"); ref.drop(columns=["PAY_AMT1"]).to_csv(p, index=False)
+        try:
+            ler_planilha(p)
+            resultados_formatos["aviso de coluna ausente"] = False
+        except ValueError as e:
+            resultados_formatos["aviso de coluna ausente"] = "PAY_AMT1" in str(e)
+    registrar("Importação lê .csv, .xlsx e variações do dataset, e avisa qual coluna está ausente",
+              all(resultados_formatos.values()), f"{sum(resultados_formatos.values())}/{len(resultados_formatos)} formatos")
+
+
 def teste_arquivos_ausentes():
     with tempfile.TemporaryDirectory() as tmp:
         atual = os.getcwd()
@@ -241,9 +314,11 @@ def main():
     os.chdir(PASTA)
     for bloco, testes in [
         ("A) A rede neural", [teste_gradiente, teste_saida_sigmoide, teste_xor, teste_metricas]),
-        ("B) Os dados", [teste_dados, teste_entradas_lote_vs_individual, teste_divisao_e_normalizacao]),
-        ("C) O modelo salvo", [teste_modelo_salvo, teste_reprodutibilidade]),
-        ("D) A aplicação", [teste_validacao_de_entrada, teste_importacao, teste_arquivos_ausentes]),
+        ("B) Os dados", [teste_dados, teste_divisao_estratificada,
+                       teste_oversampling, teste_normalizacao]),
+        ("C) O modelo salvo", [teste_modelo_salvo, teste_matriz_de_confusao, teste_reprodutibilidade]),
+        ("D) A aplicação", [teste_validacao_de_entrada, teste_importacao, teste_formatos_de_arquivo,
+                          teste_arquivos_ausentes]),
     ]:
         print(f"\n--- {bloco} ---")
         for t in testes:

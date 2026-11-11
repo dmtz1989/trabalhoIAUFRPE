@@ -75,10 +75,17 @@ class MLP:
         self.b1 -= self.lr * db1
 
     # ---------- Treinamento ----------
-    def treinar(self, X, y, X_val=None, y_val=None, epocas=100, tamanho_lote=64,
+    def treinar(self, X, y, monitorar=None, epocas=100, tamanho_lote=64,
                 semente=42, verbose=True):
+        """
+        monitorar: dicionário opcional {"nome": (X, y)}. O MSE desses conjuntos é
+        acompanhado a cada época apenas para desenhar a curva de aprendizado:
+        eles NÃO participam do treino e não influenciam nenhuma decisão.
+        """
         rng = np.random.default_rng(semente)
-        historico = {"erro_treino": [], "erro_val": []}
+        monitorar = monitorar or {}
+        historico = {"treino": []}
+        historico.update({nome: [] for nome in monitorar})
 
         for epoca in range(1, epocas + 1):
             ordem = rng.permutation(len(X))            # embaralha a cada época
@@ -87,15 +94,14 @@ class MLP:
                 self.forward(X[idx])
                 self.backward(y[idx])
 
-            erro_t = self.mse(self.prever_proba(X), y)
-            historico["erro_treino"].append(erro_t)
-            if X_val is not None:
-                historico["erro_val"].append(self.mse(self.prever_proba(X_val), y_val))
+            historico["treino"].append(self.mse(self.prever_proba(X), y))
+            for nome, (Xm, ym) in monitorar.items():
+                historico[nome].append(self.mse(self.prever_proba(Xm), ym))
 
             if verbose and (epoca == 1 or epoca % 10 == 0):
-                msg = f"Época {epoca:3d} | MSE treino: {erro_t:.4f}"
-                if X_val is not None:
-                    msg += f" | MSE validação: {historico['erro_val'][-1]:.4f}"
+                msg = f"Época {epoca:3d} | MSE treino: {historico['treino'][-1]:.4f}"
+                for nome in monitorar:
+                    msg += f" | MSE {nome}: {historico[nome][-1]:.4f}"
                 print(msg)
         return historico
 
