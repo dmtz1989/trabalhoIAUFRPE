@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 from mlp import MLP
 
-ARQUIVO_DADOS = "default of credit card clients.xls"
+ARQUIVO_DADOS = "default_of_credit_card_clients.xls"
 ARQUIVO_MODELO = "modelo_mlp.npz"
 COLUNA_ALVO = "default payment next month"
 

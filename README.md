@@ -65,6 +65,7 @@ credito_mlp/
 ├── app.py                 # Aplicação (menu): cadastro, importação do banco, relatório e exportação
 ├── avaliar_modelo.py      # Confere o modelo salvo (sem retreinar): banco completo, treino e teste
 ├── validacoes.py          # Bateria de 19 testes que comprova o funcionamento do projeto
+├── colab_credito_mlp.ipynb # Notebook para rodar o projeto no Google Colab (aula e apresentação)
 ├── modelo_mlp.npz         # Modelo treinado (pesos, normalização e limiar)
 ├── curva_aprendizado.png  # Gráfico do MSE por época
 ├── requirements.txt       # Dependências
@@ -80,6 +81,7 @@ credito_mlp/
 | `app.py` | Usa o modelo salvo para analisar clientes (um a um ou o banco inteiro) | Para usar a aplicação |
 | `avaliar_modelo.py` | **Confere** o modelo **já salvo**, sem retreinar: compara o banco completo, o treino (70%) e o teste (30%), com a matriz de confusão | Para verificar o modelo, por exemplo mostrar que treino e teste dão o mesmo resultado |
 | `validacoes.py` | Prova que o código está correto (gradiente, divisão, oversampling, importação etc.) | Antes de entregar ou ao alterar o código |
+| `colab_credito_mlp.ipynb` | Notebook que monta o projeto no Google Colab, treina, mostra a matriz de confusão, roda as validações e abre a aplicação | Para apresentar ou testar em sala de aula, sem instalar nada |
 | `mlp.py` | A rede neural em si, usada pelos demais | Não é executado diretamente |
 
 O `avaliar_modelo.py` **não substitui** o `treinamento.py` e vice-versa: o primeiro só mede o que o segundo produziu. O número que mede a capacidade de generalização do modelo é o do **teste**, que o próprio `treinamento.py` já imprime; o do banco completo é otimista, porque inclui os clientes usados no treino.
@@ -118,6 +120,21 @@ O repositório já inclui um `modelo_mlp.npz` treinado, então é possível roda
 | 4 | Relatório de acurácia dos clientes que têm resultado real conhecido |
 | 5 | Exportar os resultados para `resultados_clientes.csv` |
 | 0 | Sair |
+
+### Executando no Google Colab
+
+O notebook `colab_credito_mlp.ipynb` roda o projeto inteiro no navegador, sem instalar nada. O Colab já traz NumPy, pandas e matplotlib; uma CPU comum é suficiente (não precisa de GPU).
+
+1. Acesse [colab.research.google.com](https://colab.research.google.com) e entre com a conta Google.
+2. Vá em **Arquivo → Fazer upload de notebook** e escolha `colab_credito_mlp.ipynb`.
+3. Execute a primeira célula de código. Quando a janela de envio abrir, selecione **`credito_mlp.zip`** (o projeto compactado) e **`default_of_credit_card_clients.xls`** (o banco), os dois de uma vez.
+4. Execute as demais células em ordem (**Ctrl + Enter**, ou *Ambiente de execução → Executar tudo*). O notebook treina, mostra a curva de aprendizado e a matriz de confusão, roda as validações, testa um cliente e abre o menu da aplicação.
+
+Observações:
+
+- **Os arquivos enviados ao Colab somem quando a sessão termina.** Na próxima aula, basta rodar a primeira célula de novo. Para evitar o reenvio do projeto, use o GitHub (abaixo).
+- **Pelo GitHub:** com o projeto em um repositório, cole a URL (terminada em `.git`) na variável `URL_GITHUB` da primeira célula e o código é baixado de lá. O banco `.xls` ainda precisa ser enviado se não estiver no repositório. Também dá para abrir o notebook direto do repositório pelo endereço `https://colab.research.google.com/github/SEU-USUARIO/SEU-REPOSITORIO/blob/main/colab_credito_mlp.ipynb` (troque pelo seu usuário e repositório; o ramo principal precisa se chamar `main`).
+- **Menu da aplicação:** a última célula abre o menu e espera as opções digitadas no campo que aparece logo abaixo dela.
 
 ---
 
@@ -476,6 +493,7 @@ O relatório mostra acurácia, precisão, recall, F1, matriz de confusão e AUC 
 |---|---|---|
 | `TypeError: MLP.treinar() got an unexpected keyword argument 'monitorar'` (ou erro parecido de função ou parâmetro que não existe) | Arquivos de **versões diferentes** misturados na mesma pasta, por exemplo um `mlp.py` antigo com um `treinamento.py` novo | Copie **todos** os arquivos `.py` do projeto de uma vez, nunca só alguns. Para conferir, rode `python validacoes.py` |
 | `Pandas4Warning: The xlrd engine is deprecated ...` | O pandas novo avisa que o leitor de `.xls` (xlrd) será descontinuado. Não é um erro | `pip install python-calamine`; o projeto passa a usá-lo automaticamente |
+| No Colab: `ModuleNotFoundError: No module named 'app'` (ou `O projeto não está preparado nesta sessão`) | A célula **1. Preparar o projeto** não foi executada nesta sessão. Quando a sessão do Colab reinicia ou desconecta, os arquivos enviados são apagados e a pasta volta ao início | Execute a célula 1 de novo e envie o `credito_mlp.zip` e o `.xls`; depois rode as demais em ordem. Não é preciso mexer no `sys.path` |
 | `Modelo 'modelo_mlp.npz' não encontrado. Treinando um novo...` | O arquivo do modelo não está na pasta | Nada a fazer: o treino é feito e o modelo é salvo sozinho (o `.xls` precisa estar na pasta) |
 | `Banco de dados '...xls' não encontrado na pasta` | O arquivo `default_of_credit_card_clients.xls` não está na mesma pasta dos scripts | Coloque o banco na pasta do projeto |
 | `Colunas ausentes no arquivo: [...]` | O arquivo importado não tem as colunas necessárias (`LIMIT_BAL`, `PAY_0` a `PAY_6` e `PAY_AMT1`) | Use o banco do UCI ou um arquivo com essas colunas |
